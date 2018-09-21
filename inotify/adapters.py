@@ -166,7 +166,7 @@ class Inotify(object):
 
             header = _INOTIFY_EVENT(*header_raw)
             type_names = self._get_event_names(header.mask)
-            _LOGGER.debug("Events received in stream: {}".format(type_names))
+            _LOGGER.debug("Events received in stream: {0}".format(type_names))
 
             event_length = (_STRUCT_HEADER_LENGTH + header.len)
             if length < event_length:
