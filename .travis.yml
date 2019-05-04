@@ -6,14 +6,27 @@ matrix:
           python: 2.6
           cache: pip
         - os: linux
+          dist: precise
+          python: 2.6
+          cache: pip
+          env: USE_SCANDIR=1
+        - os: linux
           dist: xenial
           python: 2.7
+        - os: linux
+          dist: xenial
+          python: 2.7
+          env: USE_SCANDIR=1
         - os: linux
           dist: precise
           python: 3.3
         - os: linux
           dist: trusty
           python: 3.4
+        - os: linux
+          dist: trusty
+          python: 3.4
+          env: USE_SCANDIR=1
         - os: linux
           dist: xenial
           python: 3.5
@@ -25,6 +38,7 @@ matrix:
           python: 3.7
 install:
   - if [[ $TRAVIS_PYTHON_VERSION == '2.6' ]]; then pip install pycparser==2.18 idna==2.7; pip install unittest2; fi
+  - if [[ $USE_SCANDIR ]]; then pip install scandir; fi
   - pip install -r requirements.txt
   - pip install coveralls
 script: nosetests -s -v --with-coverage --cover-package=inotify
