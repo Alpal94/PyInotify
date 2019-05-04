@@ -356,8 +356,12 @@ class TestInotifyTree(unittest.TestCase):
             else:
                 expected += [
                     (inotify.adapters._INOTIFY_EVENT(wd=1, mask=1073742336, cookie=0, len=16), ['IN_DELETE', 'IN_ISDIR'], path, 'aa'),
+                    (inotify.adapters._INOTIFY_EVENT(wd=w2, mask=1024, cookie=0, len=0), ['IN_DELETE_SELF'], path1, ''),
+                    (inotify.adapters._INOTIFY_EVENT(wd=w2, mask=32768, cookie=0, len=0), ['IN_IGNORED'], path1, ''),
 
                     (inotify.adapters._INOTIFY_EVENT(wd=1, mask=1073742336, cookie=0, len=16), ['IN_DELETE', 'IN_ISDIR'], path, 'bb'),
+                    (inotify.adapters._INOTIFY_EVENT(wd=w3, mask=1024, cookie=0, len=0), ['IN_DELETE_SELF'], path2, ''),
+                    (inotify.adapters._INOTIFY_EVENT(wd=w3, mask=32768, cookie=0, len=0), ['IN_IGNORED'], path2, ''),
                 ]
 
             self.assertEquals(events, expected)
@@ -469,6 +473,8 @@ class TestInotifyTree(unittest.TestCase):
             else:
                 expected += [
                     (inotify.adapters._INOTIFY_EVENT(wd=1, mask=1073742336, cookie=0, len=16), ['IN_DELETE', 'IN_ISDIR'], path, 'new_folder'),
+                    (inotify.adapters._INOTIFY_EVENT(wd=3, mask=1024, cookie=0, len=0), ['IN_DELETE_SELF'], new_path, ''),
+                    (inotify.adapters._INOTIFY_EVENT(wd=3, mask=32768, cookie=0, len=0), ['IN_IGNORED'], new_path, ''),
                 ]
 
             self.assertEquals(events3, expected)
