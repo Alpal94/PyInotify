@@ -31,8 +31,9 @@ def setUpModule():
 
         i = inotify.adapters.Inotify()
         i.add_watch(path)
-
         dircontent = os.listdir(inner_path)
+        i.add_watch(inner_path)
+        os.rmdir(inner_path)
 
         events = list(i.event_gen(timeout_s=1, yield_nones=False))
 
@@ -45,14 +46,33 @@ def setUpModule():
             (inotify.adapters._INOTIFY_EVENT(wd=1, mask=1073741825, cookie=0, len=16), ['IN_ACCESS', 'IN_ISDIR'], path, subdirname),
             (inotify.adapters._INOTIFY_EVENT(wd=1, mask=1073741840, cookie=0, len=16), ['IN_CLOSE_NOWRITE', 'IN_ISDIR'], path, subdirname),
         ]
+        expected_ws = [
+                (inotify.adapters._INOTIFY_EVENT(wd=1, mask=1073742336, cookie=0, len=16), ['IN_DELETE', 'IN_ISDIR'], path, subdirname),
+                (inotify.adapters._INOTIFY_EVENT(wd=2, mask=1024, cookie=0, len=0), ['IN_DELETE_SELF'], inner_path, ''),
+                (inotify.adapters._INOTIFY_EVENT(wd=2, mask=32768, cookie=0, len=0), ['IN_IGNORED'], inner_path, ''),
+        ]
+        expected_ns = [
+                (inotify.adapters._INOTIFY_EVENT(wd=2, mask=1024, cookie=0, len=0), ['IN_DELETE_SELF'], inner_path, ''),
+                (inotify.adapters._INOTIFY_EVENT(wd=2, mask=32768, cookie=0, len=0), ['IN_IGNORED'], inner_path, ''),
+                (inotify.adapters._INOTIFY_EVENT(wd=1, mask=1073742336, cookie=0, len=16), ['IN_DELETE', 'IN_ISDIR'], path, subdirname),
+        ]
         global _HAS_DIRECTORY_ACCESS_EVENTS
-        if events == expected_na:
-            _HAS_DIRECTORY_ACCESS_EVENTS = False
-        elif events == expected_wa:
+        global _HAS_STRONG_PARENT_AFTER_CHILD
+        if events == expected_wa + expected_ns:
             _HAS_DIRECTORY_ACCESS_EVENTS = True
+            _HAS_STRONG_PARENT_AFTER_CHILD = True
+        elif events == expected_na + expected_ws:
+            _HAS_DIRECTORY_ACCESS_EVENTS = False
+            _HAS_STRONG_PARENT_AFTER_CHILD = False
+        elif events == expected_wa + expected_ws:
+            _HAS_DIRECTORY_ACCESS_EVENTS = True
+            _HAS_STRONG_PARENT_AFTER_CHILD = False
+        elif events == expected_na + expected_ns:
+            _HAS_DIRECTORY_ACCESS_EVENTS = False
+            _HAS_STRONG_PARENT_AFTER_CHILD = True
         else:
-            print('Got unknown list directory pattern:\n%r' %(events,))
-            raise AssertionError('Found neighter expected list-directory pattern')
+            print('Got unknown directory access pattern:\n%r' %(events,))
+            raise AssertionError('Found neighter expected directory access pattern')
 
 
 class TestInotify(unittest.TestCase):
@@ -65,6 +85,8 @@ class TestInotify(unittest.TestCase):
     def setUpClass(cls):
         global _HAS_DIRECTORY_ACCESS_EVENTS
         cls._HAS_DIRECTORY_ACCESS_EVENTS = _HAS_DIRECTORY_ACCESS_EVENTS
+        global _HAS_STRONG_PARENT_AFTER_CHILD
+        cls._HAS_STRONG_PARENT_AFTER_CHILD = _HAS_STRONG_PARENT_AFTER_CHILD
 
     def __read_all_events(self, i):
         events = list(i.event_gen(timeout_s=1, yield_nones=False))
@@ -217,6 +239,8 @@ class TestInotifyTree(unittest.TestCase):
     def setUpClass(cls):
         global _HAS_DIRECTORY_ACCESS_EVENTS
         cls._HAS_DIRECTORY_ACCESS_EVENTS = _HAS_DIRECTORY_ACCESS_EVENTS
+        global _HAS_STRONG_PARENT_AFTER_CHILD
+        cls._HAS_STRONG_PARENT_AFTER_CHILD = _HAS_STRONG_PARENT_AFTER_CHILD
 
     def __read_all_events(self, i):
         events = list(i.event_gen(timeout_s=1, yield_nones=False))
@@ -317,15 +341,24 @@ class TestInotifyTree(unittest.TestCase):
                 (inotify.adapters._INOTIFY_EVENT(wd=1, mask=512, cookie=0, len=16), ['IN_DELETE'], path, 'seen_new_file1'),
                 (inotify.adapters._INOTIFY_EVENT(wd=w2, mask=512, cookie=0, len=16), ['IN_DELETE'], path1, 'seen_new_file2'),
                 (inotify.adapters._INOTIFY_EVENT(wd=w3, mask=512, cookie=0, len=16), ['IN_DELETE'], path2, 'seen_new_file3'),
-
-                (inotify.adapters._INOTIFY_EVENT(wd=w2, mask=1024, cookie=0, len=0), ['IN_DELETE_SELF'], path1, ''),
-                (inotify.adapters._INOTIFY_EVENT(wd=w2, mask=32768, cookie=0, len=0), ['IN_IGNORED'], path1, ''),
-                (inotify.adapters._INOTIFY_EVENT(wd=1, mask=1073742336, cookie=0, len=16), ['IN_DELETE', 'IN_ISDIR'], path, 'aa'),
-
-                (inotify.adapters._INOTIFY_EVENT(wd=w3, mask=1024, cookie=0, len=0), ['IN_DELETE_SELF'], path2, ''),
-                (inotify.adapters._INOTIFY_EVENT(wd=w3, mask=32768, cookie=0, len=0), ['IN_IGNORED'], path2, ''),
-                (inotify.adapters._INOTIFY_EVENT(wd=1, mask=1073742336, cookie=0, len=16), ['IN_DELETE', 'IN_ISDIR'], path, 'bb'),
             ]
+
+            if self._HAS_STRONG_PARENT_AFTER_CHILD:
+                expected += [
+                    (inotify.adapters._INOTIFY_EVENT(wd=w2, mask=1024, cookie=0, len=0), ['IN_DELETE_SELF'], path1, ''),
+                    (inotify.adapters._INOTIFY_EVENT(wd=w2, mask=32768, cookie=0, len=0), ['IN_IGNORED'], path1, ''),
+                    (inotify.adapters._INOTIFY_EVENT(wd=1, mask=1073742336, cookie=0, len=16), ['IN_DELETE', 'IN_ISDIR'], path, 'aa'),
+
+                    (inotify.adapters._INOTIFY_EVENT(wd=w3, mask=1024, cookie=0, len=0), ['IN_DELETE_SELF'], path2, ''),
+                    (inotify.adapters._INOTIFY_EVENT(wd=w3, mask=32768, cookie=0, len=0), ['IN_IGNORED'], path2, ''),
+                    (inotify.adapters._INOTIFY_EVENT(wd=1, mask=1073742336, cookie=0, len=16), ['IN_DELETE', 'IN_ISDIR'], path, 'bb'),
+                ]
+            else:
+                expected += [
+                    (inotify.adapters._INOTIFY_EVENT(wd=1, mask=1073742336, cookie=0, len=16), ['IN_DELETE', 'IN_ISDIR'], path, 'aa'),
+
+                    (inotify.adapters._INOTIFY_EVENT(wd=1, mask=1073742336, cookie=0, len=16), ['IN_DELETE', 'IN_ISDIR'], path, 'bb'),
+                ]
 
             self.assertEquals(events, expected)
 
@@ -425,11 +458,18 @@ class TestInotifyTree(unittest.TestCase):
                 (inotify.adapters._INOTIFY_EVENT(wd=3, mask=128, cookie=events3[4][0].cookie, len=16), ['IN_MOVED_TO'], new_path, 'new_filename'),
 
                 (inotify.adapters._INOTIFY_EVENT(wd=3, mask=512, cookie=0, len=16), ['IN_DELETE'], new_path, 'new_filename'),
-
-                (inotify.adapters._INOTIFY_EVENT(wd=3, mask=1024, cookie=0, len=0), ['IN_DELETE_SELF'], new_path, ''),
-                (inotify.adapters._INOTIFY_EVENT(wd=3, mask=32768, cookie=0, len=0), ['IN_IGNORED'], new_path, ''),
-                (inotify.adapters._INOTIFY_EVENT(wd=1, mask=1073742336, cookie=0, len=16), ['IN_DELETE', 'IN_ISDIR'], path, 'new_folder'),
             ]
+
+            if self._HAS_STRONG_PARENT_AFTER_CHILD:
+                expected += [
+                    (inotify.adapters._INOTIFY_EVENT(wd=3, mask=1024, cookie=0, len=0), ['IN_DELETE_SELF'], new_path, ''),
+                    (inotify.adapters._INOTIFY_EVENT(wd=3, mask=32768, cookie=0, len=0), ['IN_IGNORED'], new_path, ''),
+                    (inotify.adapters._INOTIFY_EVENT(wd=1, mask=1073742336, cookie=0, len=16), ['IN_DELETE', 'IN_ISDIR'], path, 'new_folder'),
+                ]
+            else:
+                expected += [
+                    (inotify.adapters._INOTIFY_EVENT(wd=1, mask=1073742336, cookie=0, len=16), ['IN_DELETE', 'IN_ISDIR'], path, 'new_folder'),
+                ]
 
             self.assertEquals(events3, expected)
 
@@ -784,6 +824,8 @@ class TestInotifyTrees(unittest.TestCase):
     def setUpClass(cls):
         global _HAS_DIRECTORY_ACCESS_EVENTS
         cls._HAS_DIRECTORY_ACCESS_EVENTS = _HAS_DIRECTORY_ACCESS_EVENTS
+        global _HAS_STRONG_PARENT_AFTER_CHILD
+        cls._HAS_STRONG_PARENT_AFTER_CHILD = _HAS_STRONG_PARENT_AFTER_CHILD
 
     def __read_all_events(self, i):
         events = list(i.event_gen(timeout_s=1, yield_nones=False))
