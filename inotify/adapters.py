@@ -7,11 +7,14 @@ import time
 
 if hasattr(os, 'scandir'):
     from os import walk
+    scandirmode = 'builtin'
 else:
     try:
         from scandir import walk
+        scandirmode = 'external'
     except ImportError:
         from os import walk
+        scandirmode = 'unavailable'
 
 from errno import EINTR
 
@@ -31,6 +34,7 @@ _DEFAULT_TERMINAL_EVENTS = (
 # Globals.
 
 _LOGGER = logging.getLogger(__name__)
+_LOGGER.debug("Inotify initialized with scandir state '%s'.", scandirmode)
 
 _INOTIFY_EVENT = collections.namedtuple(
                     '_INOTIFY_EVENT',
