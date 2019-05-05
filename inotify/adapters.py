@@ -347,12 +347,8 @@ class _BaseTree(object):
                 if header.mask & inotify.constants.IN_ISDIR:
                     full_path = os.path.join(path, filename)
 
-                    if (
-                        (header.mask & inotify.constants.IN_MOVED_TO) or
-                        (header.mask & inotify.constants.IN_CREATE)
-                       ) and \
-                       (
-                        os.path.exists(full_path) is True or
+                    if ((header.mask & inotify.constants.IN_MOVED_TO) or
+                        (header.mask & inotify.constants.IN_CREATE))
                         # todo: as long as the "Path already being watche/not in watch list" warnings
                         # instead of exceptions are in place, it should really be default to also log
                         # only a warning if target folder does not exists in tree autodiscover mode.
@@ -361,20 +357,15 @@ class _BaseTree(object):
                         # to event_gen but to InotifyTree(s) constructor (at least set default there)
                         # to not steal someones use case to specify this differently for each event_gen 
                         # call?? Even more this expression is simply wrong.
-                        ignore_missing_new_folders is False
-                       ) and \
-                       (
-                        path not in self._ignored_dirs or
-                        filename not in self._ignored_dirs[path]
-                       ):
+                        if (ignore_missing_new_folders is False or os.path.exists(full_path) is True)\
+                         and (path not in self._ignored_dirs or filename not in self._ignored_dirs[path]):
                         _LOGGER.debug("A directory has been created. We're "
                                       "adding a watch on it (because we're "
                                       "being recursive): [%s]", full_path)
 
+                            self._load_tree(full_path)
 
-                        self._load_tree(full_path)
-
-                    if header.mask & inotify.constants.IN_DELETE:
+                    elif header.mask & inotify.constants.IN_DELETE:
                         _LOGGER.debug("A directory has been removed. We're "
                                       "being recursive, but it would have "
                                       "automatically been deregistered: [%s]",
@@ -385,7 +376,7 @@ class _BaseTree(object):
                         # before the watch on the child disappeared
                         # also we have to take in mind that the subdirectory could be on
                         # ignore list (currently that is handled by the remove_watch but a
-                        # debug message is emitted than what is not fine)
+                        # debug message is emitted then what is not fine)
 
                         # The watch would've already been cleaned-up internally.
                         self._i.remove_watch(full_path, superficial=True)
