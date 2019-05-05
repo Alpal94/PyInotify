@@ -37,11 +37,18 @@ IN_IGNORED    = 0x00008000 # File was ignored. (=Watch has been removed. [termin
 
 ## Special flags.
 
+# for add watch:
+
 IN_ONLYDIR     = 0x01000000 # Only watch the path if it is a directory.
 IN_DONT_FOLLOW = 0x02000000 # Do not follow a sym link.
+IN_EXCL_UNLINK = 0x04000000 # Exclude events on unlinked objects.
+IN_MASK_CREATE = 0x10000000 # Ensure watch is not already established..
 IN_MASK_ADD    = 0x20000000 # Add to the mask of an already existing watch.
-IN_ISDIR       = 0x40000000 # Event occurred against dir.
 IN_ONESHOT     = 0x80000000 # Only send event once.
+
+# returned as part of event:
+
+IN_ISDIR       = 0x40000000 # Event occurred against dir.
 
 ## All events sent by kernel
 
@@ -76,6 +83,8 @@ MASK_LOOKUP = {
 
     0x01000000: 'IN_ONLYDIR',
     0x02000000: 'IN_DONT_FOLLOW',
+    0x04000000: 'IN_EXCL_UNLINK',
+    0x10000000: 'IN_MASK_CREATE',
     0x20000000: 'IN_MASK_ADD',
     0x40000000: 'IN_ISDIR',
     0x80000000: 'IN_ONESHOT',

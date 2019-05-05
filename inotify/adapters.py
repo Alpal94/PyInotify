@@ -26,6 +26,9 @@ import inotify.calls
 _DEFAULT_EPOLL_BLOCK_DURATION_S = 1
 _HEADER_STRUCT_FORMAT = 'iIII'
 
+# todo: the real terminal event beside IN_Q_OVERFLOW is IN_IGNORED
+# ohterwise the IN_DELETE_SELF would count as much as IN_UNMOUNT
+# where both could be handled differently, depending on context
 _DEFAULT_TERMINAL_EVENTS = (
     'IN_Q_OVERFLOW',
     'IN_UNMOUNT',
@@ -99,6 +102,7 @@ class Inotify(object):
         # then be adding it, yet again, if we then receive it in the normal
         # fashion afterward.
         if path_unicode in self.__watches:
+            # to consider: a raise would be more appropriate for most cases
             _LOGGER.warning("Path already being watched: [%s]", path_unicode)
             return
 
@@ -138,6 +142,8 @@ class Inotify(object):
         wd = self.__watches.get(path)
         if wd is None:
             _LOGGER.warning("Path not in watch list: [%s]", path)
+            #todo: returning always None but no success indicator is not fine
+            # to consider: a raise would be more appropriate for most cases
             return
         self._remove_watch(wd, path, superficial)
 
@@ -145,6 +151,8 @@ class Inotify(object):
         """Same as remove_watch but does the same by id"""
         path = self.__watches_r.get(wd)
         if path is None:
+            #todo: returning always None but no success indicator is not fine
+            # to consider: a raise would be more appropriate for most cases
             _LOGGER.warning("Watchdescriptor not in watch list: [%d]", wd)
             return
         self._remove_watch(wd, path, superficial)
@@ -158,6 +166,8 @@ class Inotify(object):
     def _handle_inotify_event(self, wd):
         """Handle a series of events coming-in from inotify."""
 
+        # to consider: inotify should always return only complete events
+        # for a single read, so implementation could be optimized
         b = os.read(wd, 1024)
         if not b:
             return
@@ -194,6 +204,8 @@ class Inotify(object):
 
             self.__buffer = self.__buffer[event_length:]
 
+            #todo: proper accounting for renames missing (it's possible to leave
+            # that up to the user but the user currently cannot rename a watch)
             path = self.__watches_r.get(header.wd)
             if path is not None:
                 filename_unicode = filename_bytes.decode('utf8')
@@ -283,6 +295,9 @@ class _BaseTree(object):
         #
         # todo: we really should have two masks... the combined one (requested|needed)
         # and the user specified mask for the events he wants to receive from tree...
+        #
+        # todo: we shouldn't allow the IN_ONESHOT, IN_MASK_* flags here
+        # while IN_DONT_FOLLOW, IN_EXCL_UNLINK possibly need special implementation
         self._mask = mask | \
                         inotify.constants.IN_ISDIR | \
                         inotify.constants.IN_CREATE | \
@@ -330,7 +345,8 @@ class _BaseTree(object):
                         # - but probably better to implement that with try/catch around add_watch
                         # when errno fix is merged and also this should normally not be an argument
                         # to event_gen but to InotifyTree(s) constructor (at least set default there)
-                        # to not steal someones use case to specify this differently for each event_call??
+                        # to not steal someones use case to specify this differently for each event_gen 
+                        # call?? Even more this expression is simply wrong.
                         ignore_missing_new_folders is False
                        ) and \
                        (
@@ -350,6 +366,13 @@ class _BaseTree(object):
                                       "automatically been deregistered: [%s]",
                                       full_path)
 
+                        # todo: it would be appropriate to ensure the the watch is not removed
+                        # that far that following events from the child fd are suppressed
+                        # before the watch on the child disappeared
+                        # also we have to take in mind that the subdirectory could be on
+                        # ignore list (currently that is handled by the remove_watch but a
+                        # debug message is emitted than what is not fine)
+
                         # The watch would've already been cleaned-up internally.
                         self._i.remove_watch(full_path, superficial=True)
                     elif header.mask & inotify.constants.IN_MOVED_FROM:
@@ -359,6 +382,11 @@ class _BaseTree(object):
                                       "if target parent dir is within "
                                       "our tree: [%s]", full_path)
 
+                        # todo: it would be fine if no remove/add action would take place
+                        # if directory is moved within watched tree (so doesn't goes out of scope
+                        # by the move)
+                        # also we have to take in mind that the subdirectory could be on
+                        # ignore list (currently that is handled by the exception handler)
                         try:
                             self._i.remove_watch(full_path, superficial=False)
                         except inotify.calls.InotifyError as ex:
@@ -378,20 +406,24 @@ class _BaseTree(object):
             for subdir in subdirs:
                 if subdir in ignored_subdirs:
                     continue
+                # todo: this add_watch should include the IN_ONLYDIR flag
                 inotify.add_watch(os.path.join(dirpath, subdir), mask)
                 yield subdir
 
         inotify = self._i
         mask = self._mask
+        # todo: this add_watch should include the IN_ONLYDIR flag
         inotify.add_watch(path, mask)
         ignored_dirs = self._ignored_dirs
 
+        # todo: check wheter and how to handle symlinks to directories
         for dirpath, subdirs, _f in walk(path):
             ignored_subdirs = ignored_dirs.get(dirpath)
             if ignored_subdirs:
                 subdirs[:] = filter_dirs_add_watches_gen(inotify, mask, dirpath, subdirs, ignored_subdirs)
                 continue
             for subdir in subdirs:
+                # todo: this add_watch should include the IN_ONLYDIR flag
                 inotify.add_watch(os.path.join(dirpath, subdir), mask)
 
 class InotifyTree(_BaseTree):
