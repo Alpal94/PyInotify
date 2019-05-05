@@ -9,6 +9,7 @@ _LOGGER = logging.getLogger(__name__)
 _LIB = inotify.library.instance
 
 
+# todo: make this properly a subclass of OSError
 class InotifyError(Exception):
     def __init__(self, message, *args, **kwargs):
         errnum = ctypes.get_errno()
@@ -19,6 +20,7 @@ class InotifyError(Exception):
 
         super(InotifyError, self).__init__(message, *args, **kwargs)
 
+# todo: remove (comment-out) unused checks to avoid dead code and increase test.coverage
 def _check_zero(result):
     if result != 0:
         raise InotifyError("Call failed (should return zero): (%d)" % 
@@ -26,6 +28,7 @@ def _check_zero(result):
 
     return result
 
+# todo: remove (comment-out) unused checks to avoid dead code and increase test.coverage
 def _check_nonzero(result):
     if result == 0:
         raise InotifyError("Call failed (should return nonzero): (%d)" % 
