@@ -25,9 +25,9 @@ IN_MOVE          = (IN_MOVED_FROM | IN_MOVED_TO)
 
 ## All events which a program can wait on.
 
-IN_ALL_EVENTS    = (IN_ACCESS | IN_MODIFY | IN_ATTRIB | IN_CLOSE_WRITE |
-                    IN_CLOSE_NOWRITE | IN_OPEN | IN_MOVED_FROM | IN_MOVED_TO | 
-                    IN_CREATE | IN_DELETE | IN_DELETE_SELF | IN_MOVE_SELF)
+IN_ALL_EVENTS_WATCH = (IN_ACCESS | IN_MODIFY | IN_ATTRIB | IN_CLOSE_WRITE |
+                       IN_CLOSE_NOWRITE | IN_OPEN | IN_MOVED_FROM | IN_MOVED_TO | 
+                       IN_CREATE | IN_DELETE | IN_DELETE_SELF | IN_MOVE_SELF)
 
 ## Events sent by kernel.
 
@@ -52,7 +52,11 @@ IN_ISDIR       = 0x40000000 # Event occurred against dir.
 
 ## All events sent by kernel
 
-X_IN_ALL_EVENTS  = (IN_ALL_EVENTS | IN_UNMOUNT | IN_Q_OVERFLOW | IN_IGNORED)
+IN_ALL_EVENTS  = (IN_ALL_EVENTS_WATCH | IN_UNMOUNT | IN_Q_OVERFLOW | IN_IGNORED)
+
+## All flags that can sensefully be used with add_watch
+
+IN_ALL_MASKVALS = (IN_ALL_EVENTS_WATCH | IN_ONLYDIR | IN_DONT_FOLLOW | IN_EXCL_UNLINK | IN_MASK_CREATE | IN_MASK_ADD | IN_ONESHOT)
 
 MASK_LOOKUP = {
     0o2000000: 'IN_CLOEXEC',
@@ -95,5 +99,5 @@ MASK_LOOKUP = {
 #  things can change... (IN_ISDIR/IN_ACCESS is also "unspecified"
 #  but happens on some (newer?) kernels)
 MASK_LOOKUP_COMB = dict(((em|dm, [en]+dn)
-                         for em, en in MASK_LOOKUP.items() if em & X_IN_ALL_EVENTS
+                         for em, en in MASK_LOOKUP.items() if em & IN_ALL_EVENTS
                          for dm, dn in ((0, []), (IN_ISDIR, ['IN_ISDIR']))))

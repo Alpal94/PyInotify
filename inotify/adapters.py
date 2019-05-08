@@ -51,11 +51,12 @@ _INOTIFY_EVENT = collections.namedtuple(
 _STRUCT_HEADER_LENGTH = struct.calcsize(_HEADER_STRUCT_FORMAT)
 _IS_DEBUG = bool(int(os.environ.get('DEBUG', '0')))
 
-
+#todo: we should have a master exception for the whole adapter
 class EventTimeoutException(Exception):
     pass
 
 
+#todo: we should have a master exception for the whole adapter
 class TerminalEventException(Exception):
     def __init__(self, type_name, event):
         super(TerminalEventException, self).__init__(type_name)
@@ -93,8 +94,12 @@ class Inotify(object):
         _LOGGER.debug("Cleaning-up inotify.")
         os.close(self.__inotify_fd)
 
-    def add_watch(self, path_unicode, mask=inotify.constants.IN_ALL_EVENTS):
+    def add_watch(self, path_unicode, mask=inotify.constants.IN_ALL_EVENTS_WATCH):
         _LOGGER.debug("Adding watch: [%s]", path_unicode)
+        # todo: log a warning if user supplies something in mask that is not valid as mask (but silently ignored)
+        # defined IN_ALL_MASKVALS for that (should encourage user to understand when they are requesting something
+        # wrong and make it more likely that they log an issue if they have some valid mask value from sources
+        # which isn't implemented in PyInotify
 
         # todo: handle removes for same object (with possible different pathnames)
         # more outcome-oriented
@@ -224,7 +229,7 @@ class Inotify(object):
 
     def event_gen(
             self, timeout_s=None, yield_nones=True, filter_predicate=None,
-            terminal_events=_DEFAULT_TERMINAL_EVENTS):
+            terminal_events=_DEFAULT_TERMINAL_EVENTS, mask=inotify.constants.IN_ALL_EVENTS):
         """Yield one event after another. If `timeout_s` is provided, we'll
         break when no event is received for that many seconds.
         """
@@ -285,7 +290,8 @@ class Inotify(object):
                         elif type_name in terminal_events:
                             raise TerminalEventException(type_name, e)
 
-                    yield e
+                    if header.mask & mask:
+                        yield e
 
             if timeout_s is not None:
                 time_since_event_s = time.time() - last_hit_s
@@ -306,18 +312,22 @@ class _BaseTree(object):
 
         # No matter what we actually received as the mask, make sure we have
         # the minimum that we require to curate our list of watches.
-        #
-        # todo: we really should have two masks... the combined one (requested|needed)
-        # and the user specified mask for the events he wants to receive from tree...
-        #
-        # todo: we shouldn't allow the IN_ONESHOT, IN_MASK_* flags here
-        # while IN_DONT_FOLLOW, IN_EXCL_UNLINK possibly need special implementation
+        if mask & (inotify.constants.IN_MASK_CREATE | inotify.constants.IN_MASK_ADD | inotify.constants.IN_ONESHOT):
+            raise ValueError('mask must not contain IN_MASK_CREATE/IN_MASK_ADD/IN_ONESHOT for ' + self.__class__.__name__)
+        if mask & inotify.constants.IN_DONT_FOLLOW:
+            _LOGGER.info('IN_DONT_FOLLOW (or the opposite) currently not implemented for ' + self.__class__.__name__)
+        if mask & inotify.constants.IN_ONLYDIR:
+            _LOGGER.info('IN_ONLYDIR (or the opposite) currently not implemented for ' + self.__class__.__name__)
+        # if we would want to give user the opportunity to get only IS_DIR events this would need to be implemented
+        # in a dedicated way
+        self._consumer_mask = mask & (~inotify.constants.IN_ISDIR)
         self._mask = mask | \
-                        inotify.constants.IN_ISDIR | \
                         inotify.constants.IN_CREATE | \
                         inotify.constants.IN_MOVED_TO | \
                         inotify.constants.IN_DELETE | \
-                        inotify.constants.IN_MOVED_FROM
+                        inotify.constants.IN_MOVED_FROM | \
+                        inotify.constants.IN_DELETE_SELF | \
+                        inotify.constants.IN_MOVE_SELF
 
         ignored_dirs_lookup = {}
         for parent, child in (os.path.split(ignored.rstrip('/')) for ignored in ignored_dirs):
@@ -329,7 +339,24 @@ class _BaseTree(object):
                 ignored_dirs_lookup[parent] = set((child,))
         self._ignored_dirs = ignored_dirs_lookup
 
+        self._moved_out_dirs = {}
+        self._deleted_dirs = {}
+        self._top_level_watches = {}
+
         self._i = Inotify(block_duration_s=block_duration_s)
+
+    def __directory_deleted(self, full_path):
+        self._i.remove_watch(full_path, superficial=True)
+
+    def __directory_moved_out(self, full_path):
+        try:
+            self._i.remove_watch(full_path, superficial=False)
+        except inotify.calls.InotifyError as ex:
+            # for the unlikely case the moved diretory is deleted
+            # and automatically unregistered before we try to
+            # unregister....
+            pass
+
 
     def event_gen(self, ignore_missing_new_folders=False, **kwargs):
         """This is a secondary generator that wraps the principal one, and
@@ -340,6 +367,7 @@ class _BaseTree(object):
         `ignore_missing_new_folders`.
         """
 
+        consumer_mask = self._consumer_mask
         for event in self._i.event_gen(**kwargs):
             if event is not None:
                 (header, type_names, path, filename) = event
@@ -347,8 +375,8 @@ class _BaseTree(object):
                 if header.mask & inotify.constants.IN_ISDIR:
                     full_path = os.path.join(path, filename)
 
-                    if ((header.mask & inotify.constants.IN_MOVED_TO) or
-                        (header.mask & inotify.constants.IN_CREATE))
+                    if (header.mask & inotify.constants.IN_MOVED_TO)\
+                     or (header.mask & inotify.constants.IN_CREATE):
                         # todo: as long as the "Path already being watche/not in watch list" warnings
                         # instead of exceptions are in place, it should really be default to also log
                         # only a warning if target folder does not exists in tree autodiscover mode.
@@ -359,9 +387,9 @@ class _BaseTree(object):
                         # call?? Even more this expression is simply wrong.
                         if (ignore_missing_new_folders is False or os.path.exists(full_path) is True)\
                          and (path not in self._ignored_dirs or filename not in self._ignored_dirs[path]):
-                        _LOGGER.debug("A directory has been created. We're "
-                                      "adding a watch on it (because we're "
-                                      "being recursive): [%s]", full_path)
+                            _LOGGER.debug("A directory has been created. We're "
+                                          "adding a watch on it (because we're "
+                                          "being recursive): [%s]", full_path)
 
                             self._load_tree(full_path)
 
@@ -379,7 +407,7 @@ class _BaseTree(object):
                         # debug message is emitted then what is not fine)
 
                         # The watch would've already been cleaned-up internally.
-                        self._i.remove_watch(full_path, superficial=True)
+                        self.__directory_deleted(full_path)
                     elif header.mask & inotify.constants.IN_MOVED_FROM:
                         _LOGGER.debug("A directory has been renamed. We're "
                                       "being recursive, we will remove watch "
@@ -392,15 +420,11 @@ class _BaseTree(object):
                         # by the move)
                         # also we have to take in mind that the subdirectory could be on
                         # ignore list (currently that is handled by the exception handler)
-                        try:
-                            self._i.remove_watch(full_path, superficial=False)
-                        except inotify.calls.InotifyError as ex:
-                            # for the unlikely case the moved diretory is deleted
-                            # and automatically unregistered before we try to
-                            # unregister....
-                            pass
-
-            yield event
+                        self.__directory_moved_out(full_path)
+                if header.mask & consumer_mask:
+                    yield event
+            else:
+                yield event
 
     @property
     def inotify(self):
@@ -411,29 +435,38 @@ class _BaseTree(object):
         # (events that are generated by the implementation and not inotify) for all
         # found objects so that consumers do not need to scan directories again to
         # generate themself an overview of the tree
-        def filter_dirs_add_watches_gen(inotify, mask, dirpath, subdirs, ignored_subdirs):
-            for subdir in subdirs:
-                if subdir in ignored_subdirs:
-                    continue
-                # todo: this add_watch should include the IN_ONLYDIR flag
-                inotify.add_watch(os.path.join(dirpath, subdir), mask)
-                yield subdir
 
-        inotify = self._i
-        mask = self._mask
-        # todo: this add_watch should include the IN_ONLYDIR flag
-        inotify.add_watch(path, mask)
+        i = self._i
+        mask = self._mask | inotify.constants.IN_ONLYDIR
+        wd = i.add_watch(path, mask)
+        added_watches = [(path, wd)]
         ignored_dirs = self._ignored_dirs
 
-        # todo: check wheter and how to handle symlinks to directories
+        # todo: check whether and how to handle symlinks to directories
         for dirpath, subdirs, _f in walk(path):
-            ignored_subdirs = ignored_dirs.get(dirpath)
-            if ignored_subdirs:
-                subdirs[:] = filter_dirs_add_watches_gen(inotify, mask, dirpath, subdirs, ignored_subdirs)
-                continue
-            for subdir in subdirs:
-                # todo: this add_watch should include the IN_ONLYDIR flag
-                inotify.add_watch(os.path.join(dirpath, subdir), mask)
+            if subdirs:
+                num_subdirs = len(subdirs)
+                pos_subdirs = 0
+                ignored_subdirs = ignored_dirs.get(dirpath)
+                if ignored_subdirs:
+                    while pos_subdirs < num_subdirs:
+                        subdir = subdirs[pos_subdirs]
+                        if subdir in ignored_subdirs:
+                            del subdirs[pos_subdirs]
+                            num_subdirs -= 1
+                            continue
+                        path = os.path.join(dirpath, subdir)
+                        wd = i.add_watch(path, mask)
+                        added_watches.append((path, wd))
+                        pos_subdirs += 1
+                else:
+                    while pos_subdirs < num_subdirs:
+                        subdir = subdirs[pos_subdirs]
+                        path = os.path.join(dirpath, subdir)
+                        wd = i.add_watch(path, mask)
+                        added_watches.append((path, wd))
+                        pos_subdirs += 1
+        return added_watches
 
 class InotifyTree(_BaseTree):
     """Recursively watch a path."""
@@ -447,7 +480,8 @@ class InotifyTree(_BaseTree):
 
     def __load_tree(self, path):
         _LOGGER.debug("Adding initial watches on tree: [%s]", path)
-        self._load_tree(path)
+        tl_watch_path, tl_watch_desc = self._load_tree(path)[0]
+        self._top_level_watches[tl_watch_path] = tl_watch_desc
 
 
 class InotifyTrees(_BaseTree):
@@ -463,4 +497,5 @@ class InotifyTrees(_BaseTree):
     def __load_trees(self, paths):
         _LOGGER.debug("Adding initial watches on trees: [%s]", ",".join(map(str, paths)))
         for path in paths:
-            self._load_tree(path)
+            tl_watch_path, tl_watch_desc = self._load_tree(path)[0]
+            self._top_level_watches[tl_watch_path] = tl_watch_desc
